@@ -14,6 +14,9 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONF_ACCOUNT_NUMBER, DEFAULT_SCAN_INTERVAL, DOMAIN
+
+from .const import CONF_READING_FREQUENCY, SUPPORTED_READING_FREQUENCIES, DEFAULT_READING_FREQUENCY
+
 from .octopus_french import OctopusFrenchApiClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +43,9 @@ class OctopusFrenchConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self.email = user_input[CONF_EMAIL]
             self.password = user_input[CONF_PASSWORD]
+            self.user_input_frequency = user_input.get(
+                CONF_READING_FREQUENCY, DEFAULT_READING_FREQUENCY
+            )
             self.api_client = OctopusFrenchApiClient(self.email, self.password)
 
             try:
@@ -64,6 +70,12 @@ class OctopusFrenchConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                     CONF_PASSWORD: self.password,
                                     CONF_ACCOUNT_NUMBER: self.accounts[0]["number"],
                                 },
+                                options={
+                                    CONF_READING_FREQUENCY: user_input.get(
+                                        CONF_READING_FREQUENCY,
+                                        DEFAULT_READING_FREQUENCY
+                                    )
+                                }
                             )
                         # Si plusieurs comptes, passer à l'étape de sélection
                         return await self.async_step_account()
@@ -87,6 +99,10 @@ class OctopusFrenchConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_EMAIL): str,
                     vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(
+                        CONF_READING_FREQUENCY, 
+                        default=DEFAULT_READING_FREQUENCY
+                    ): vol.In(SUPPORTED_READING_FREQUENCIES),
                 }
             ),
             errors=errors,
@@ -111,6 +127,9 @@ class OctopusFrenchConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PASSWORD: self.password,
                     CONF_ACCOUNT_NUMBER: account_number,
                 },
+                options={
+                    CONF_READING_FREQUENCY: self.user_input_frequency
+                }
             )
 
         account_list = {
@@ -146,7 +165,8 @@ class OctopusFrenchOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)  # type: ignore[return-value]
 
-        return self.async_show_form(  # type: ignore[return-value]
+
+        return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
@@ -155,7 +175,14 @@ class OctopusFrenchOptionsFlow(config_entries.OptionsFlow):
                         default=self.config_entry.options.get(
                             "scan_interval", DEFAULT_SCAN_INTERVAL
                         ),
-                    )
+                    ): int,
+                    vol.Optional(
+                        CONF_READING_FREQUENCY,
+                        default=self.config_entry.options.get(
+                            CONF_READING_FREQUENCY,
+                            DEFAULT_READING_FREQUENCY
+                        )
+                    ): vol.In(SUPPORTED_READING_FREQUENCIES),
                 }
-            ),
+            )
         )

@@ -1,3 +1,4 @@
+
 """Data update coordinator for Octopus French Energy."""
 
 from __future__ import annotations
@@ -11,7 +12,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_SCAN_INTERVAL
+from .const import (
+    DEFAULT_SCAN_INTERVAL,
+    CONF_READING_FREQUENCY,
+    DEFAULT_READING_FREQUENCY,
+    FREQ_HOURLY,
+    FREQ_DAILY,
+)
 
 if TYPE_CHECKING:
     from .octopus_french import OctopusFrenchApiClient
@@ -28,6 +35,7 @@ class OctopusFrenchDataUpdateCoordinator(DataUpdateCoordinator):
         api_client: OctopusFrenchApiClient,
         account_number: str,
         scan_interval: int = DEFAULT_SCAN_INTERVAL,
+        reading_frequency: str = DEFAULT_READING_FREQUENCY,
     ) -> None:
         """Initialize coordinator."""
         super().__init__(
@@ -38,6 +46,27 @@ class OctopusFrenchDataUpdateCoordinator(DataUpdateCoordinator):
         )
         self.api_client = api_client
         self.account_number = account_number
+        self.reading_frequency = reading_frequency
+
+    # ---------------------------------------------------------------------
+    # 🆕 Calcule dynamiquement la fenêtre temporelle (72h en horaire)
+    # ---------------------------------------------------------------------
+    def _compute_date_window(self) -> tuple[str, str]:
+        now = dt_util.now()
+
+        if self.reading_frequency == FREQ_HOURLY:
+            # Étendu de 48h → 72h comme demandé
+            start = now - timedelta(hours=72)
+
+        elif self.reading_frequency == FREQ_DAILY:
+            # 31 jours glissants
+            start = now - timedelta(days=31)
+
+        else:
+            # Fallback
+            start = now - timedelta(days=7)
+
+        return start.isoformat(), now.isoformat()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -81,74 +110,27 @@ class OctopusFrenchDataUpdateCoordinator(DataUpdateCoordinator):
         gas_supply_points = account_data.get("supply_points", {}).get("gas", [])
         gas_meter_id = gas_supply_points[0]["id"] if gas_supply_points else None
 
-        # Calculer les dates avec le timezone de Home Assistant
-        now = dt_util.now()
-        today_midnight = dt_util.start_of_local_day(now)
-        first_of_month = today_midnight.replace(day=1)
-        electricity_start = first_of_month.isoformat()
-        date_end = (today_midnight + timedelta(days=1)).isoformat()
-        gas_start = (today_midnight - timedelta(days=365)).isoformat()
+        # ---------------------------------------------------------------------
+        # 🆕 Fenêtre temporelle dynamique
+        # ---------------------------------------------------------------------
+        elec_start, elec_end = self._compute_date_window()
 
-        # Récupération des données électricité (journalières agrégées)
+        # ---------------------------------------------------------------------
+        # Récupération des données électricité (fréquence dynamique)
+        # ---------------------------------------------------------------------
         electricity_readings = []
         elec_index = None
 
         if electricity_meter_id:
             electricity_readings = await self.api_client.get_energy_readings(
                 account_id,
-                electricity_start,
-                date_end,
+                elec_start,
+                elec_end,
                 electricity_meter_id,
                 utility_type="electricity",
-                reading_frequency="DAY_INTERVAL",
+                reading_frequency=self.reading_frequency,
                 reading_quality="ACTUAL",
-                first=100,
+                first=500,
             )
 
             elec_index = await self.api_client.get_electricity_index(
-                account_number, electricity_meter_id
-            )
-
-        # Stocker les données électricité
-        account_data["electricity"] = {
-            "readings": electricity_readings,
-            "index": elec_index,
-        }
-
-        # Récupération des données gaz (mensuelles)
-        gas = []
-        if gas_meter_id:
-            gas = await self.api_client.get_energy_readings(
-                account_id,
-                gas_start,
-                date_end,
-                gas_meter_id,
-                utility_type="gas",
-                reading_frequency="MONTH_INTERVAL",
-                first=100,
-            )
-
-        account_data["gas"] = gas
-
-        # Récupérer les demandes de paiement
-        await self._fetch_payment_requests(account_data)
-
-        _LOGGER.debug("Account data updated successfully: %s", account_data)
-        return account_data
-
-    async def _fetch_payment_requests(self, account_data: dict[str, Any]) -> None:
-        """Fetch payment requests for all ledgers."""
-        ledgers = account_data.get("ledgers", {})
-        payment_requests = {}
-
-        for ledger_type, ledger_info in ledgers.items():
-            ledger_number = ledger_info.get("number")
-            if ledger_number:
-                with suppress(Exception):
-                    payment_request = await self.api_client.get_payment_requests(
-                        ledger_number
-                    )
-                    if payment_request:
-                        payment_requests[ledger_type] = payment_request
-
-        account_data["payment_requests"] = payment_requests

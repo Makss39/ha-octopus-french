@@ -1,3 +1,4 @@
+
 {
   "config": {
     "step": {
@@ -6,7 +7,8 @@
         "description": "Enter your Octopus Energy France account credentials",
         "data": {
           "email": "Email",
-          "password": "Password"
+          "password": "Password",
+          "reading_frequency": "Reading frequency"
         }
       }
     },
@@ -24,7 +26,11 @@
     "step": {
       "init": {
         "title": "Octopus Energy France options",
-        "description": "Configure the update interval"
+        "description": "Configure the update interval and the reading frequency",
+        "data": {
+          "scan_interval": "Update interval (minutes)",
+          "reading_frequency": "Reading frequency"
+        }
       }
     }
   },
@@ -33,241 +39,142 @@
       "conso_base": {
         "name": "Consumption / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
       "conso_hp": {
         "name": "Peak hours / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
       "conso_hc": {
         "name": "Off-peak hours / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
       "cout_base": {
         "name": "Cost / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
       "cout_hp": {
         "name": "Peak hours cost / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
       "cout_hc": {
         "name": "Off-peak hours cost / current month",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" },
+          "window_start": { "name": "Window start" },
+          "window_end": { "name": "Window end" }
         }
       },
+
       "index_base": {
         "name": "Meter index",
         "state_attributes": {
-          "index_start": {
-            "name": "Starting index"
-          },
-          "consumption": {
-            "name": "Consumption"
-          },
-          "period_start": {
-            "name": "Period start"
-          },
-          "period_end": {
-            "name": "Period end"
-          },
-          "status": {
-            "name": "Status"
-          },
-          "consumption_reliability": {
-            "name": "Consumption reliability"
-          },
-          "index_reliability": {
-            "name": "Index reliability"
-          },
-          "tariff_type": {
-            "name": "Tariff type"
-          },
-          "prm_id": {
-            "name": "PRM reference"
-          }
+          "index_start": { "name": "Starting index" },
+          "consumption": { "name": "Consumption" },
+          "period_start": { "name": "Period start" },
+          "period_end": { "name": "Period end" },
+          "status": { "name": "Status" },
+          "consumption_reliability": { "name": "Consumption reliability" },
+          "index_reliability": { "name": "Index reliability" },
+          "tariff_type": { "name": "Tariff type" },
+          "prm_id": { "name": "PRM reference" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       },
       "index_hp": {
         "name": "Peak hours index",
         "state_attributes": {
-          "index_start": {
-            "name": "Starting index"
-          },
-          "consumption": {
-            "name": "Consumption"
-          },
-          "period_start": {
-            "name": "Period start"
-          },
-          "period_end": {
-            "name": "Period end"
-          },
-          "status": {
-            "name": "Status"
-          },
-          "consumption_reliability": {
-            "name": "Consumption reliability"
-          },
-          "index_reliability": {
-            "name": "Index reliability"
-          },
-          "tariff_type": {
-            "name": "Tariff type"
-          },
-          "prm_id": {
-            "name": "PRM reference"
-          }
+          "index_start": { "name": "Starting index" },
+          "consumption": { "name": "Consumption" },
+          "period_start": { "name": "Period start" },
+          "period_end": { "name": "Period end" },
+          "status": { "name": "Status" },
+          "consumption_reliability": { "name": "Consumption reliability" },
+          "index_reliability": { "name": "Index reliability" },
+          "tariff_type": { "name": "Tariff type" },
+          "prm_id": { "name": "PRM reference" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       },
       "index_hc": {
         "name": "Off-peak hours index",
         "state_attributes": {
-          "index_start": {
-            "name": "Starting index"
-          },
-          "consumption": {
-            "name": "Consumption"
-          },
-          "period_start": {
-            "name": "Period start"
-          },
-          "period_end": {
-            "name": "Period end"
-          },
-          "status": {
-            "name": "Status"
-          },
-          "consumption_reliability": {
-            "name": "Consumption reliability"
-          },
-          "index_reliability": {
-            "name": "Index reliability"
-          },
-          "tariff_type": {
-            "name": "Tariff type"
-          },
-          "prm_id": {
-            "name": "PRM reference"
-          }
+          "index_start": { "name": "Starting index" },
+          "consumption": { "name": "Consumption" },
+          "period_start": { "name": "Period start" },
+          "period_end": { "name": "Period end" },
+          "status": { "name": "Status" },
+          "consumption_reliability": { "name": "Consumption reliability" },
+          "index_reliability": { "name": "Index reliability" },
+          "tariff_type": { "name": "Tariff type" },
+          "prm_id": { "name": "PRM reference" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       },
-      "contrat": {
+
+      "contract": {
         "name": "Contract",
         "state_attributes": {
-          "ledger_id": {
-            "name": "Ledger ID"
-          },
-          "prm_id": {
-            "name": "PRM reference"
-          },
-          "agreement": {
-            "name": "Contract type"
-          },
-          "distributor_status": {
-            "name": "Distributor status"
-          },
-          "meter_kind": {
-            "name": "Meter type"
-          },
-          "subscribed_max_power": {
-            "name": "Subscribed power"
-          },
-          "is_teleoperable": {
-            "name": "Remote operable"
-          },
-          "off_peak_label": {
-            "name": "Off-peak hours schedule"
-          },
-          "powered_status": {
-            "name": "Supply status"
-          },
-          "pce_ref": {
-            "name": "PCE reference"
-          },
-          "gas_nature": {
-            "name": "Gas type"
-          },
-          "annual_consumption": {
-            "name": "Annual consumption"
-          },
-          "is_smart_meter": {
-            "name": "Smart meter"
-          }
+          "ledger_id": { "name": "Ledger ID" },
+          "prm_id": { "name": "PRM reference" },
+          "agreement": { "name": "Contract type" },
+          "distributor_status": { "name": "Distributor status" },
+          "meter_kind": { "name": "Meter type" },
+          "subscribed_max_power": { "name": "Subscribed power" },
+          "is_teleoperable": { "name": "Remote operable" },
+          "off_peak_label": { "name": "Off-peak hours schedule" },
+          "powered_status": { "name": "Supply status" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       },
+
       "consumption": {
         "name": "Consumption",
         "state_attributes": {
-          "current_month": {
-            "name": "Current month"
-          },
-          "readings_count": {
-            "name": "Number of readings"
-          },
-          "calculation_method": {
-            "name": "Calculation method"
-          }
+          "current_month": { "name": "Current month" },
+          "readings_count": { "name": "Number of readings" },
+          "calculation_method": { "name": "Calculation method" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       },
+
       "electricity_bill": {
         "name": "Electricity bill",
         "state_attributes": {
@@ -284,15 +191,9 @@
               "deleted": "Deleted"
             }
           },
-          "total_amount": {
-            "name": "Total amount"
-          },
-          "customer_amount": {
-            "name": "Customer amount"
-          },
-          "expected_payment_date": {
-            "name": "Expected payment date"
-          }
+          "total_amount": { "name": "Total amount" },
+          "customer_amount": { "name": "Customer amount" },
+          "expected_payment_date": { "name": "Expected payment date" }
         }
       },
       "gas_bill": {
@@ -311,29 +212,17 @@
               "deleted": "Deleted"
             }
           },
-          "total_amount": {
-            "name": "Total amount"
-          },
-          "customer_amount": {
-            "name": "Customer amount"
-          },
-          "expected_payment_date": {
-            "name": "Expected payment date"
-          }
+          "total_amount": { "name": "Total amount" },
+          "customer_amount": { "name": "Customer amount" },
+          "expected_payment_date": { "name": "Expected payment date" }
         }
       },
       "pot_ledger": {
         "name": "Credit balance",
         "state_attributes": {
-          "ledger_number": {
-            "name": "Ledger number"
-          },
-          "ledger_name": {
-            "name": "Ledger name"
-          },
-          "balance_cents": {
-            "name": "Balance (cents)"
-          }
+          "ledger_number": { "name": "Ledger number" },
+          "ledger_name": { "name": "Ledger name" },
+          "balance_cents": { "name": "Balance (cents)" }
         }
       }
     },
@@ -341,24 +230,16 @@
       "hc_active": {
         "name": "Off-peak hours active",
         "state_attributes": {
-          "hc_schedule_available": {
-            "name": "Schedule available"
-          },
-          "total_hc_hours": {
-            "name": "Total off-peak hours"
-          },
-          "hc_type": {
-            "name": "Off-peak type"
-          },
-          "hc_range_1": {
-            "name": "Time range 1"
-          },
-          "hc_range_2": {
-            "name": "Time range 2"
-          },
-          "hc_range_3": {
-            "name": "Time range 3"
-          }
+          "hc_schedule_available": { "name": "Schedule available" },
+          "total_hc_hours": { "name": "Total off-peak hours" },
+          "hc_type": { "name": "Off-peak type" },
+          "hc_range_1": { "name": "Time range 1" },
+          "hc_range_2": { "name": "Time range 2" },
+          "hc_range_3": { "name": "Time range 3" },
+          "next_hc_start": { "name": "Next off-peak start" },
+          "next_hc_end": { "name": "Next off-peak end" },
+          "is_hc_now": { "name": "Currently in off-peak" },
+          "reading_frequency": { "name": "Reading frequency" }
         }
       }
     }

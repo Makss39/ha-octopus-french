@@ -1,10 +1,10 @@
-"""Sensor platform for Octopus Energy France - CORRECTED VERSION."""
+"""Sensor platform for Octopus Energy France - ADAPTED FOR READING FREQUENCY."""
 
 from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import Any
+from typing import Any, Optional, Iterable
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -19,7 +19,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, LEDGER_TYPE_ELECTRICITY, LEDGER_TYPE_GAS
+from .const import (
+    DOMAIN,
+    LEDGER_TYPE_ELECTRICITY,
+    LEDGER_TYPE_GAS,
+    CONF_READING_FREQUENCY,
+    DEFAULT_READING_FREQUENCY,
+)
+
 from .coordinator import OctopusFrenchDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,7 +91,7 @@ ELECTRICITY_SENSORS = [
     },
 ]
 
-# Configuration des sensors d'index
+# Index sensors (Linky)
 ELECTRICITY_INDEX_SENSORS = [
     {
         "key": "index_base",
@@ -174,14 +181,16 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Octopus Energy France sensors."""
-    coordinator: OctopusFrenchDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
-    account_number = hass.data[DOMAIN][entry.entry_id]["account_number"]
+    store = hass.data[DOMAIN][entry.entry_id]
+    coordinator: OctopusFrenchDataUpdateCoordinator = store["coordinator"]
+    account_number = store["account_number"]
+    reading_frequency: str = store.get(
+        CONF_READING_FREQUENCY, DEFAULT_READING_FREQUENCY
+    )
 
     await coordinator.async_config_entry_first_refresh()
 
-    entities = []
+    entities: list[SensorEntity] = []
     supply_points = coordinator.data.get("supply_points", {})
     ledgers = coordinator.data.get("ledgers", {})
 
@@ -193,7 +202,7 @@ async def async_setup_entry(
             if sensor_config["ledger_type"] in ledgers
         )
 
-    # Electricity sensors
+    # Electricity sensors (per electricity meter)
     for elec_meter in supply_points.get("electricity", []):
         if (
             elec_meter.get("distributorStatus") == "RESIL"
@@ -204,7 +213,7 @@ async def async_setup_entry(
         prm_id = elec_meter.get("id")
         tariff_type = _detect_tariff_type_for_meter(coordinator.data, prm_id)
 
-        # Sensors de consommation/coût
+        # consumption/cost sensors
         for sensor_config in ELECTRICITY_SENSORS:
             sensor_key = sensor_config["key"]
 
@@ -217,10 +226,12 @@ async def async_setup_entry(
                 )
             ):
                 entities.append(
-                    OctopusElectricitySensor(coordinator, prm_id, sensor_config)
+                    OctopusElectricitySensor(
+                        coordinator, prm_id, sensor_config, reading_frequency
+                    )
                 )
 
-        # Sensors d'index (compteur Linky)
+        # Index sensors (Linky)
         index_data = coordinator.data.get("electricity", {}).get("index")
         if index_data:
             index_tariff_type = index_data.get("tariff_type")
@@ -228,17 +239,18 @@ async def async_setup_entry(
             for index_config in ELECTRICITY_INDEX_SENSORS:
                 index_type = index_config["index_type"]
 
-                # Créer le sensor si le type correspond au tarif
                 if (index_tariff_type == "BASE" and index_type == "base") or (
                     index_tariff_type == "HPHC" and index_type in ["hp", "hc"]
                 ):
                     entities.append(
-                        OctopusElectricityIndexSensor(coordinator, prm_id, index_config)
+                        OctopusElectricityIndexSensor(
+                            coordinator, prm_id, index_config, reading_frequency
+                        )
                     )
 
     # Gas sensors
     entities.extend(
-        OctopusGasSensor(coordinator, gas_meter.get("id"), sensor_config)
+        OctopusGasSensor(coordinator, gas_meter.get("id"), sensor_config, reading_frequency)
         for gas_meter in supply_points.get("gas", [])
         for sensor_config in GAS_SENSORS
     )
@@ -247,7 +259,7 @@ async def async_setup_entry(
 
 
 def _detect_tariff_type_for_meter(data: dict, prm_id: str) -> str:
-    """Détecte le type de tarif pour un compteur spécifique."""
+    """Detect tariff type for a specific meter based on latest reading statistics."""
     try:
         electricity_readings = data.get("electricity", {}).get("readings", [])
         if not electricity_readings:
@@ -272,19 +284,22 @@ def _detect_tariff_type_for_meter(data: dict, prm_id: str) -> str:
 
 
 class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
-    """Sensor for electricity data with FIXED cumulative logic."""
+    """Sensor for electricity data aggregating readings (hourly/daily)."""
 
     def __init__(
         self,
         coordinator: OctopusFrenchDataUpdateCoordinator,
         prm_id: str,
         sensor_config: dict,
+        reading_frequency: str,
     ) -> None:
         """Initialize the electricity sensor."""
         super().__init__(coordinator)
 
         self._prm_id = prm_id
         self._sensor_config = sensor_config
+        self._reading_frequency = reading_frequency
+
         self._attr_unique_id = f"{DOMAIN}_{prm_id}_{sensor_config['key']}"
         self._attr_translation_key = sensor_config["key"]
         self._attr_has_entity_name = True
@@ -299,87 +314,109 @@ class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
 
         self._current_month: str | None = None
 
+    # ---------------- Helpers ----------------
+
     def _get_current_month(self) -> str:
         """Get current month in YYYY-MM format."""
         return dt_util.now().strftime("%Y-%m")
 
-    def _calculate_monthly_total(self) -> float:
-        """Calcul monthly total."""
-        key = self._sensor_config["key"]
-        readings = self.coordinator.data.get("electricity", {}).get("readings", [])
+    @staticmethod
+    def _safe_sorted_readings(readings: list[dict]) -> list[dict]:
+        try:
+            return sorted(readings, key=lambda x: x.get("startAt") or "", reverse=False)
+        except Exception as e:
+            _LOGGER.debug("Sorting readings failed: %s", e)
+            return readings
 
+    @staticmethod
+    def _window_info(readings: Iterable[dict]) -> tuple[Optional[str], Optional[str], int]:
+        """Compute window start/end and count from readings."""
+        starts = []
+        for r in readings:
+            s = r.get("startAt")
+            if s:
+                starts.append(s)
+        if not starts:
+            return None, None, 0
+        starts_sorted = sorted(starts)
+        return starts_sorted[0], starts_sorted[-1], len(starts_sorted)
+
+    def _statistics_labels_for_key(self) -> tuple[set[str], bool]:
+        """Return (accepted_labels, is_cost) depending on the sensor key."""
+        key = self._sensor_config["key"]
+
+        # Consumption sensors (kWh)
+        if key == "conso_base":
+            return {"BASE"}, False
+        if key == "conso_hp":
+            return {"HEURES_PLEINES"}, False
+        if key == "conso_hc":
+            return {"HEURES_CREUSES"}, False
+
+        # Cost sensors (EUR) - labels in statistics correspond to consumption metric they price
+        if key == "cout_base":
+            return {"CONSO_BASE"}, True
+        if key == "cout_hp":
+            return {"CONSO_HEURES_PLEINES"}, True
+        if key == "cout_hc":
+            return {"CONSO_HEURES_CREUSES"}, True
+
+        return set(), False
+
+    def _calculate_monthly_total(self) -> float:
+        """Aggregate values for the current month from readings (hourly/daily)."""
+        key = self._sensor_config["key"]
+        readings = self.coordinator.data.get("electricity", {}).get("readings", []) or []
         if not readings:
             return 0.0
 
-        try:
-            sorted_readings = sorted(
-                readings, key=lambda x: x.get("startAt", ""), reverse=False
-            )
-        except (TypeError, KeyError) as e:
-            _LOGGER.warning("Error sorting readings: %s", e)
-            sorted_readings = readings
-
+        sorted_readings = self._safe_sorted_readings(readings)
         current_month = self._get_current_month()
         total = 0.0
 
-        # Mapping pour consommations
-        consumption_mapping = {
-            "conso_base": "BASE",
-            "conso_hp": "HEURES_PLEINES",
-            "conso_hc": "HEURES_CREUSES",
-        }
-
-        # Mapping pour coûts
-        cost_mapping = {
-            "cout_base": "CONSO_BASE",
-            "cout_hp": "CONSO_HEURES_PLEINES",
-            "cout_hc": "CONSO_HEURES_CREUSES",
-        }
+        accepted_labels, is_cost = self._statistics_labels_for_key()
 
         for reading in sorted_readings:
             reading_date = reading.get("startAt")
-
             if not reading_date:
                 continue
 
             try:
                 date_obj = datetime.fromisoformat(reading_date)
                 reading_month = date_obj.strftime("%Y-%m")
-
-                # Ignorer les lectures des mois précédents
-                if reading_month != current_month:
-                    continue
-
-            except (ValueError, TypeError, AttributeError) as e:
-                _LOGGER.warning("Error parsing date %s: %s", reading_date, e)
+            except Exception as e:
+                _LOGGER.debug("Date parsing error %s: %s", reading_date, e)
                 continue
 
-            statistics = reading.get("metaData", {}).get("statistics", [])
+            # We aggregate only for the current month
+            if reading_month != current_month:
+                continue
 
+            statistics = reading.get("metaData", {}).get("statistics", []) or []
+            # Iterate over stats; select matching labels
             for stat in statistics:
-                label = stat.get("label", "")
+                label = stat.get("label")
+                if label not in accepted_labels:
+                    continue
 
-                # Pour les consommations (kWh)
-                if key.startswith("conso_"):
-                    expected_label = consumption_mapping.get(key)
-                    value = stat.get("value")
+                if not is_cost:
+                    # Consumption path
+                    v = stat.get("value")
+                    if v is not None:
+                        total += float(v)
+                else:
+                    # Cost path (EUR from cents)
+                    cost = stat.get("costInclTax")
+                    if cost and "estimatedAmount" in cost:
+                        total += float(cost.get("estimatedAmount", 0)) / 100.0
 
-                    if value is not None and label == expected_label:
-                        total += float(value)
+        # round according to sensor precision if declared
+        precision = self._sensor_config.get("precision")
+        if precision is not None:
+            return round(total, precision)
+        return total
 
-                # Pour les coûts (EUR)
-                elif key.startswith("cout_"):
-                    expected_label = cost_mapping.get(key)
-                    cost_data = stat.get("costInclTax")
-
-                    if (
-                        cost_data
-                        and "estimatedAmount" in cost_data
-                        and label == expected_label
-                    ):
-                        total += float(cost_data.get("estimatedAmount")) / 100
-
-        return round(total, 2)
+    # ---------------- State & attributes ----------------
 
     @property
     def native_value(self) -> float | str | None:
@@ -391,11 +428,8 @@ class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
 
         if key.startswith(("conso_", "cout_")):
             current_month = self._get_current_month()
-
-            # Détecter changement de mois
             if self._current_month != current_month:
                 self._current_month = current_month
-
             return self._calculate_monthly_total()
 
         return None
@@ -407,10 +441,8 @@ class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
 
         if key == "contract":
             meter = self._get_meter_data()
-
             if not meter:
                 return {}
-
             ledgers = self.coordinator.data.get("ledgers", {})
             electricity_ledger = ledgers.get(LEDGER_TYPE_ELECTRICITY, {})
 
@@ -424,19 +456,31 @@ class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
                 "is_teleoperable": meter.get("isTeleoperable"),
                 "off_peak_label": meter.get("offPeakLabel"),
                 "powered_status": meter.get("poweredStatus"),
+                "reading_frequency": self._reading_frequency,
             }
 
         if key.startswith(("conso_", "cout_")):
-            readings = self.coordinator.data.get("electricity", {}).get("readings", [])
-            readings_count = len(readings)
+            readings = self.coordinator.data.get("electricity", {}).get("readings", []) or []
+            window_start, window_end, readings_count = self._window_info(readings)
+
+            # Clarify method depending on frequency
+            if self._reading_frequency == "HOUR_INTERVAL":
+                calc_method = "Cumulée / mois (fenêtre horaire partielle)"
+            else:
+                calc_method = "Cumulée / mois"
 
             return {
                 "current_month": self._current_month,
                 "readings_count": readings_count,
-                "calculation_method": "Cumulée / mois",
+                "window_start": window_start,
+                "window_end": window_end,
+                "calculation_method": calc_method,
+                "reading_frequency": self._reading_frequency,
             }
 
         return {}
+
+    # ---------------- Internal helpers ----------------
 
     def _get_meter_data(self) -> dict | None:
         """Get meter data for this PRM ID."""
@@ -449,7 +493,6 @@ class OctopusElectricitySensor(CoordinatorEntity, SensorEntity):
         meter = self._get_meter_data()
         if not meter:
             return "Inconnu"
-
         return meter.get("providerCalendar", {}).get("id")
 
 
@@ -461,6 +504,7 @@ class OctopusElectricityIndexSensor(CoordinatorEntity, SensorEntity):
         coordinator: OctopusFrenchDataUpdateCoordinator,
         prm_id: str,
         sensor_config: dict,
+        reading_frequency: str,
     ) -> None:
         """Initialize the index sensor."""
         super().__init__(coordinator)
@@ -468,6 +512,8 @@ class OctopusElectricityIndexSensor(CoordinatorEntity, SensorEntity):
         self._prm_id = prm_id
         self._sensor_config = sensor_config
         self._index_type = sensor_config["index_type"]
+        self._reading_frequency = reading_frequency
+
         self._attr_unique_id = f"{DOMAIN}_{prm_id}_{sensor_config['key']}"
         self._attr_translation_key = sensor_config["key"]
         self._attr_has_entity_name = True
@@ -489,7 +535,6 @@ class OctopusElectricityIndexSensor(CoordinatorEntity, SensorEntity):
         if not index_data:
             return None
 
-        # Récupérer l'index de fin selon le type
         type_data = index_data.get(self._index_type, {})
         return type_data.get("index_end")
 
@@ -497,7 +542,6 @@ class OctopusElectricityIndexSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
         index_data = self.coordinator.data.get("electricity", {}).get("index")
-
         if not index_data:
             return {}
 
@@ -510,34 +554,35 @@ class OctopusElectricityIndexSensor(CoordinatorEntity, SensorEntity):
             "period_start": index_data.get("period_start"),
             "period_end": index_data.get("period_end"),
             "index_reliability": type_data.get("index_reliability"),
+            "reading_frequency": self._reading_frequency,
         }
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
         index_data = self.coordinator.data.get("electricity", {}).get("index")
-
         if not index_data:
             return False
-
-        # Le sensor est disponible si les données pour ce type existent
         return self._index_type in index_data
 
 
 class OctopusGasSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for gas data with FIXED cumulative logic."""
+    """Sensor for gas data with cumulative logic."""
 
     def __init__(
         self,
         coordinator: OctopusFrenchDataUpdateCoordinator,
         pce_ref: str,
         sensor_config: dict,
+        reading_frequency: str,
     ) -> None:
         """Initialize the gas sensor."""
         super().__init__(coordinator)
 
         self._pce_ref = pce_ref
         self._sensor_config = sensor_config
+        self._reading_frequency = reading_frequency
+
         self._attr_unique_id = f"{DOMAIN}_{pce_ref}_{sensor_config['key']}"
         self._attr_translation_key = sensor_config["key"]
         self._attr_has_entity_name = True
@@ -558,8 +603,7 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
 
     def _calculate_monthly_total(self) -> float:
         """Calculate total for current month from all readings."""
-        readings = self.coordinator.data.get("gas", [])
-
+        readings = self.coordinator.data.get("gas", []) or []
         if not readings:
             return 0.0
 
@@ -567,8 +611,8 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
             sorted_readings = sorted(
                 readings, key=lambda x: x.get("startAt", ""), reverse=False
             )
-        except (TypeError, KeyError) as e:
-            _LOGGER.warning("Error sorting gas readings: %s", e)
+        except Exception as e:
+            _LOGGER.debug("Error sorting gas readings: %s", e)
             sorted_readings = readings
 
         current_month = self._get_current_month()
@@ -576,24 +620,22 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
 
         for reading in sorted_readings:
             reading_date = reading.get("startAt")
-
             if not reading_date:
                 continue
 
             try:
                 date_obj = datetime.fromisoformat(reading_date)
                 reading_month = date_obj.strftime("%Y-%m")
-
                 if reading_month != current_month:
                     continue
-
-            except (ValueError, TypeError, AttributeError) as e:
-                _LOGGER.warning("Error parsing gas date %s: %s", reading_date, e)
+            except Exception as e:
+                _LOGGER.debug("Error parsing gas date %s: %s", reading_date, e)
                 continue
 
             total += float(reading.get("value", 0))
 
-        return round(total, 2)
+        precision = self._sensor_config.get("precision")
+        return round(total, precision) if precision is not None else total
 
     @property
     def native_value(self) -> float | str | None:
@@ -605,10 +647,8 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
 
         if key == "consumption":
             current_month = self._get_current_month()
-
             if self._current_month != current_month:
                 self._current_month = current_month
-
             return self._calculate_monthly_total()
 
         return None
@@ -635,15 +675,16 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
                 "annual_consumption": f"{meter.get('annualConsumption')} kWh",
                 "is_smart_meter": meter.get("isSmartMeter"),
                 "powered_status": meter.get("poweredStatus"),
+                "reading_frequency": self._reading_frequency,
             }
 
         if key == "consumption":
-            readings = self.coordinator.data.get("gas", [])
-
+            readings = self.coordinator.data.get("gas", []) or []
             return {
                 "current_month": self._current_month,
                 "readings_count": len(readings),
                 "calculation_method": "Cumulée / an",
+                "reading_frequency": self._reading_frequency,
             }
 
         return {}
@@ -662,7 +703,6 @@ class OctopusGasSensor(CoordinatorEntity, SensorEntity):
         return powered_map.get(powered, "unknown")
 
 
-class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
     """Sensor for account ledgers (balances)."""
 
     def __init__(
@@ -725,6 +765,81 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
                     "expected_payment_date": last_payment.get("expectedPaymentDate"),
                 }
             return {}
+
+        ledgers = self.coordinator.data.get("ledgers", {})
+        ledger = ledgers.get(self._ledger_type, {})
+
+        return {
+            "ledger_number": ledger.get("number"),
+            "ledger_name": ledger.get("name"),
+            "balance_cents": ledger.get("balance"),
+        }
+
+
+class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for account ledgers (balances)."""
+
+    def __init__(
+        self,
+        coordinator: OctopusFrenchDataUpdateCoordinator,
+        account_number: str,
+        sensor_config: dict,
+    ) -> None:
+        """Initialize the ledger sensor."""
+        super().__init__(coordinator)
+        self._account_number = account_number
+        self._ledger_type = sensor_config["ledger_type"]
+        self._sensor_config = sensor_config
+        self._attr_unique_id = f"{DOMAIN}_{account_number}_{sensor_config['key']}"
+        self._attr_translation_key = sensor_config["key"]
+        self._attr_has_entity_name = True
+        self._attr_icon = sensor_config["icon"]
+        self._attr_device_class = sensor_config["device_class"]
+        self._attr_state_class = sensor_config["state_class"]
+        self._attr_native_unit_of_measurement = sensor_config["unit"]
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, account_number)})
+
+        if sensor_config["precision"] is not None:
+            self._attr_suggested_display_precision = sensor_config["precision"]
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the balance in euros."""
+        key = self._sensor_config["key"]
+
+        if "bill" in key:
+            payment_requests = self.coordinator.data.get("payment_requests", {})
+            last_payment = payment_requests.get(self._ledger_type)
+
+            if last_payment and "customerAmount" in last_payment:
+                return last_payment["customerAmount"] / 100
+            return None
+
+        ledgers = self.coordinator.data.get("ledgers", {})
+        ledger = ledgers.get(self._ledger_type, {})
+        balance_cents = ledger.get("balance")
+
+        return balance_cents / 100 if balance_cents is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return ledger information."""
+        key = self._sensor_config["key"]
+
+        if "bill" in key:
+            payment_requests = self.coordinator.data.get("payment_requests", {})
+            last_payment = payment_requests.get(self._ledger_type)
+            if not last_payment:
+                return {}
+
+            payment_status = last_payment.get("paymentStatus", "").lower()
+
+            return {
+                "payment_status": payment_status,
+                "total_amount": last_payment.get("totalAmount", 0) / 100,
+                "customer_amount": last_payment.get("customerAmount", 0) / 100,
+                "expected_payment_date": last_payment.get("expectedPaymentDate"),
+            }
 
         ledgers = self.coordinator.data.get("ledgers", {})
         ledger = ledgers.get(self._ledger_type, {})
